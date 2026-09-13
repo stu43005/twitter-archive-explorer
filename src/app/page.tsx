@@ -2,6 +2,8 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { TweetRecord } from '@/components/TweetRecord';
+import { HandleInput } from '@/components/HandleInput';
+import { normalizeHandle, rememberHandle } from '@/lib/searchHistory';
 import type { ApiError, ArchiveResponse, ArchivedTweetRef } from '@/lib/types';
 
 const PAGE_SIZE = 50;
@@ -46,6 +48,8 @@ export default function Home() {
       if (!res.ok) throw new Error('error' in data ? data.error : `HTTP ${res.status}`);
 
       const page = data as ArchiveResponse;
+      // 只記錄真的查得到東西的帳號：打錯字的帳號留在歷史裡只會礙事。
+      if (offset === 0 && page.total > 0) rememberHandle(page.username);
       setItems((prev) => (offset === 0 ? page.items : [...prev, ...page.items]));
       setTotal(page.total);
       setNextOffset(page.nextOffset);
@@ -59,16 +63,23 @@ export default function Home() {
     }
   }, []);
 
+  const runSearch = useCallback(
+    (rawHandle: string) => {
+      const username = normalizeHandle(rawHandle);
+      if (username.length === 0) return;
+      const q: Query = { username, from, to };
+      setQuery(q);
+      setItems([]);
+      setTotal(0);
+      setNextOffset(null);
+      void load(q, 0);
+    },
+    [from, to, load],
+  );
+
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const username = input.trim().replace(/^@/, '');
-    if (!username) return;
-    const q: Query = { username, from, to };
-    setQuery(q);
-    setItems([]);
-    setTotal(0);
-    setNextOffset(null);
-    void load(q, 0);
+    runSearch(input);
   };
 
   const firstLoad = loading && items.length === 0;
@@ -92,21 +103,9 @@ export default function Home() {
       {/* ---------- 調閱單 ---------- */}
       <form onSubmit={onSubmit} className="mt-6">
         <div className="flex flex-wrap items-end gap-x-5 gap-y-4">
-          <label className="min-w-[13rem] flex-1">
-            <span className="u-caps block">帳號</span>
-            <span className="mt-1 flex items-baseline gap-1">
-              <span className="u-mono text-lg text-ink-3">@</span>
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="jack"
-                autoComplete="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                className="slip-input w-full pb-1 text-lg"
-              />
-            </span>
-          </label>
+          {/* 首次索引可能要一兩分鐘，這段期間仍讓使用者能查看歷史、準備下一個查詢。
+              重複送出是安全的：load() 會中止前一個請求。 */}
+          <HandleInput value={input} onChange={setInput} onPick={runSearch} />
 
           <label>
             <span className="u-caps block">起始日</span>
