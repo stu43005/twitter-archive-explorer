@@ -642,6 +642,7 @@ export async function fetchArchivedIndex(
       mimetype: ref.mimetype,
       snapshotCount: count,
       structured: ref.structured,
+      origin: 'archive',
     });
   }
 
