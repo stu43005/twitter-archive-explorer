@@ -96,6 +96,39 @@ JSON 兩代依「頂層有沒有 `data` 鍵」分派。2022 年後的 HTML 快�
 
 推文內容永久快取，因為存檔內容不會再變動。查核失敗（`error`）的結果不寫入快取，避免暫時性的限流被鎖住。
 
+### 送件功能
+
+介面上的「送件」可以貼上一則推文網址，即時向 X 擷取該則推文的內容，存進本站的 SQLite。
+
+用途是補上存檔索引裡沒有的推文。Internet Archive 的 `tweets-*` crawl 並非全量收錄，
+帳號時間軸上因此會缺一些推文；只要那則推文現在還在 X 上，就能用送件把它抓回來留一份，
+之後即使原文消失，本站仍讀得到內容。
+
+只能保存**現在還在**的推文。已經消失的推文，任何工具都救不回來。
+送件是**單筆手動**操作，沒有、也不該有批次送出整個帳號的功能 —— X 的端點是公共資源。
+
+> **為什麼不提供「提交到 Internet Archive」**
+>
+> 這裡曾經有第二條線，用 Save Page Now（SPN）請 Internet Archive 也存一份。
+> 2026-09-14 實測後移除，實測結果如下：
+>
+> - 用**有效**金鑰提交 `x.com/<user>/status/<id>`、`twitter.com/<user>/status/<id>`、
+>   `x.com/<user>`，SPN 一律回
+>   `{"status":"error","status_ext":"error:blocked-url","message":"We're currently facing
+>   some limitations when it comes to archiving this site. …"}`
+> - **同一組金鑰**提交 `https://example.com/` 則被正常受理，只撞到「今天已擷取 5 次，
+>   達每日上限」的配額錯誤
+>
+> 也就是說，這是 Internet Archive 端針對 X／Twitter 的**整站限制**：不是金鑰無效、
+> 不是網址格式寫錯，重試也不會成功。
+>
+> CDX 上的證據一致：SPN 來源（`x-archive-src` 為 `liveweb-...spn*`）的推文快照停在
+> 2020 年前後。現在 Internet Archive 上的推文存檔來自它自己的 `tweets-*` 管線與
+> ArchiveTeam，不是使用者提交的。
+>
+> 這不是被遺漏的功能。在 Internet Archive 解除限制之前，重新加回去只會得到同樣的
+> `error:blocked-url`。
+
 ## 對外部服務的節制
 
 Internet Archive 與 X 的端點都有速率限制，本專案在多處刻意設限：
@@ -116,15 +149,18 @@ src/
     api/archive/route.ts    列出帳號的存檔推文索引
     api/tweets/route.ts     批次取回存檔推文內容
     api/liveness/route.ts   批次查核推文是否仍存在
+    api/submit/route.ts     單筆送件：即時擷取推文並存進本地快取
     page.tsx                主頁面
   components/
     TweetRecord.tsx         單則推文紀錄卡（進入視野才載入）
     StatusStamp.tsx         存活狀態圖章
+    SubmitArchive.tsx       送件表單
   lib/
     types.ts                共用型別契約
     cdx.ts                  Wayback CDX 客戶端
     snapshot.ts             存檔快照取回與 v1/v2/HTML 解析
     liveness.ts             syndication／oEmbed 存活查核
+    liveCapture.ts          送件時即時向 X 擷取推文內容
     cache.ts                SQLite 快取
     batcher.ts              前端請求合批
 ```

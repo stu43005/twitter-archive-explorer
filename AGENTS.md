@@ -54,6 +54,29 @@ SQLite 快取都是刻意設計，**不要為了跑得快而移除**。存活查
 - 不要為了快取而引入 better-sqlite3，用 Node 內建的 `node:sqlite`。
 - 註解與使用者可見文案用繁體中文，程式識別字用英文。
 
+## 送件（`/api/submit`）
+
+送件只做一件事：即時向 X 擷取該則推文的內容，存進本地 SQLite。沒有其他分支。
+
+送件只做單筆。不要加批次送出整個帳號的功能 —— X 的端點是公共資源。
+
+### 不要重新加回 Save Page Now 提交功能
+
+曾經有第二條線用 Save Page Now（SPN）提交到 Internet Archive，**已移除，不要加回來**。
+2026-09-14 實測：
+
+- 用**有效**金鑰提交 `x.com/<user>/status/<id>`、`twitter.com/<user>/status/<id>`、
+  `x.com/<user>`，SPN 一律回 `{"status":"error","status_ext":"error:blocked-url"}`。
+- **同一組金鑰**提交 `https://example.com/` 則正常受理，只撞到每日配額上限。
+
+所以這是 Internet Archive 端對 X／Twitter 的整站限制，不是金鑰問題、不是網址格式問題，
+也不是本專案的 bug。重試、換 URL 形式、改參數都不會成功。
+CDX 上的佐證：SPN 來源（`x-archive-src` 為 `liveweb-...spn*`）的推文快照停在 2020 年前後，
+現在 IA 上的推文存檔來自它自己的 `tweets-*` 管線與 ArchiveTeam。
+
+這條線移除後專案已無任何 Internet Archive 帳號金鑰。日後若真的引入任何密鑰，
+一律只從環境變數讀取，且不得出現在錯誤訊息、log 或 API 回應中。
+
 ## API 的健壯性要求
 
 批次端點（`/api/tweets`、`/api/liveness`）**不得因為單一筆輸入格式不對就整批回 400**。
