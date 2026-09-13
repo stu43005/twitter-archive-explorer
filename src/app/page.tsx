@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { TweetRecord } from '@/components/TweetRecord';
 import { HandleInput } from '@/components/HandleInput';
+import { SubmitArchive } from '@/components/SubmitArchive';
 import { normalizeHandle, rememberHandle } from '@/lib/searchHistory';
 import type { ApiError, ArchiveResponse, ArchivedTweetRef } from '@/lib/types';
 
@@ -132,6 +133,9 @@ export default function Home() {
           </button>
         </div>
       </form>
+
+      {/* ---------- 送件（收合，預設不佔版面）---------- */}
+      <SubmitArchive />
 
       {/* ---------- 首次查詢的說明 ---------- */}
       {query === null && (
