@@ -83,9 +83,13 @@ export function TweetRecord({ tweetRef, index }: { tweetRef: ArchivedTweetRef; i
   const displayedAt = tweet?.createdAt ?? tweetRef.createdAt;
   const approximateDate = tweet === null && tweetRef.createdAtSource === 'crawl';
   const liveUrl = `https://x.com/${tweetRef.username}/status/${tweetRef.tweetId}`;
-  const snapshotUrl =
-    tweet?.snapshotUrl ??
-    `https://web.archive.org/web/${tweetRef.timestamp}/${tweetRef.originalUrl}`;
+  // 本站自己擷取的紀錄在 Internet Archive 上沒有對應快照，不能組 web.archive.org 的網址：
+  // 那樣組出來的連結必定是壞的。只有真的拿得到快照網址時才提供連結。
+  const isLocal = tweetRef.origin === 'local';
+  const snapshotUrl = isLocal
+    ? tweet?.snapshotUrl
+    : (tweet?.snapshotUrl ??
+      `https://web.archive.org/web/${tweetRef.timestamp}/${tweetRef.originalUrl}`);
 
   return (
     <article
@@ -143,7 +147,7 @@ export function TweetRecord({ tweetRef, index }: { tweetRef: ArchivedTweetRef; i
           <p className="text-[0.8125rem] italic text-ink-3">
             這筆存檔只有頁面快照、沒有可解析的推文內容
             {tweetRef.structured ? '' : '（2022 年後的快照多半是空殼頁面）'}。
-            仍可開啟快照原件查看。
+            {snapshotUrl !== undefined && '仍可開啟快照原件查看。'}
           </p>
         ) : seen ? (
           <p className="u-caps">調閱中…</p>
@@ -155,14 +159,24 @@ export function TweetRecord({ tweetRef, index }: { tweetRef: ArchivedTweetRef; i
       </div>
 
       <footer className="mt-3 flex flex-wrap items-center gap-x-3.5 gap-y-1.5 border-t border-rule pt-2.5">
-        <a
-          href={snapshotUrl}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="u-mono link-ink text-[0.6875rem] underline"
-        >
-          存檔原件 ↗
-        </a>
+        {isLocal && (
+          <span
+            className="u-caps"
+            title="這筆內容是本站直接向 X 擷取後保存的副本，Internet Archive 上沒有對應的存檔快照。"
+          >
+            本站保存
+          </span>
+        )}
+        {snapshotUrl !== undefined && (
+          <a
+            href={snapshotUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="u-mono link-ink text-[0.6875rem] underline"
+          >
+            存檔原件 ↗
+          </a>
+        )}
         <a
           href={liveUrl}
           target="_blank"
@@ -171,9 +185,11 @@ export function TweetRecord({ tweetRef, index }: { tweetRef: ArchivedTweetRef; i
         >
           X 上的原文 ↗
         </a>
-        <span className="u-mono text-[0.6875rem] text-ink-3">
-          快照 {tweetRef.snapshotCount} 份
-        </span>
+        {tweetRef.snapshotCount > 0 && (
+          <span className="u-mono text-[0.6875rem] text-ink-3">
+            快照 {tweetRef.snapshotCount} 份
+          </span>
+        )}
         {tweet && (
           <>
             <Metric label="♥" value={tweet.metrics.like} />
