@@ -1,26 +1,263 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/* ==========================================================================
+   設計語彙：檔案閱覽室 / 報業資料庫
+   紙張底、鉛字黑、紅色橡皮圖章。存檔是「館藏紀錄」而非原件，視覺上要誠實。
+   ========================================================================== */
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+:root {
+  --paper: #efe9dc;
+  --paper-2: #e7dfcd;
+  --paper-3: #ddd3bd;
+  --ink: #17140f;
+  --ink-2: #4c4438;
+  --ink-3: #837868;
+  --rule: #c6bba3;
+  --rule-strong: #8d8168;
+  --stamp: #b1232b;
+  --stamp-soft: #b1232b1f;
+  --live: #2c6a4c;
+  --live-soft: #2c6a4c1a;
+  --accent: #1d4f7c;
+  --grain-opacity: 0.4;
+  --shadow-card: 0 1px 0 var(--rule), 0 2px 10px -6px #17140f40;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --paper: #131110;
+    --paper-2: #1b1815;
+    --paper-3: #24201b;
+    --ink: #ece4d3;
+    --ink-2: #b6aa93;
+    --ink-3: #857a67;
+    --rule: #332d24;
+    --rule-strong: #524734;
+    --stamp: #e2626a;
+    --stamp-soft: #e2626a1f;
+    --live: #74c096;
+    --live-soft: #74c0961a;
+    --accent: #86b4e0;
+    --grain-opacity: 0.16;
+    --shadow-card: 0 1px 0 var(--rule), 0 2px 14px -8px #000000cc;
   }
 }
 
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-paper-3: var(--paper-3);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-stamp: var(--stamp);
+  --color-live: var(--live);
+  --color-accent: var(--accent);
+
+  --font-display: var(--font-instrument-serif), Georgia, serif;
+  --font-body: var(--font-newsreader), Georgia, serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+html {
+  color-scheme: light dark;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-optical-sizing: auto;
+}
+
+/* 紙張顆粒：整頁固定疊加，讓底色不是死板的純色 */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: var(--grain-opacity);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='0.35'/%3E%3C/svg%3E");
+}
+
+/* ---------- 排版基元 ---------- */
+
+.u-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.u-caps {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.6875rem;
+  color: var(--ink-3);
+}
+
+/* 報頭下方的雙線分隔，來自報紙 nameplate 的慣例 */
+.u-rule-double {
+  border-top: 3px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  height: 5px;
+}
+
+/* ---------- 橡皮圖章：本站的識別元素 ---------- */
+
+.stamp {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 600;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.625rem;
+  line-height: 1.1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  /* 蓋章不會蓋得很正，也不會蓋得很均勻 */
+  transform: rotate(-2.2deg);
+  opacity: 0.92;
+}
+
+.stamp-unavailable {
+  color: var(--stamp);
+  background: var(--stamp-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--stamp) 22%, transparent);
+}
+
+.stamp-live {
+  color: var(--live);
+  background: var(--live-soft);
+  transform: rotate(1.4deg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--live) 22%, transparent);
+}
+
+.stamp-checking {
+  color: var(--ink-3);
+  border-style: dashed;
+  transform: rotate(0.8deg);
+}
+
+.stamp-unknown {
+  color: var(--ink-3);
+  border-style: dotted;
+  transform: rotate(-0.6deg);
+  opacity: 0.7;
+}
+
+.stamp-error {
+  color: var(--ink-3);
+  border-style: dashed;
+  transform: rotate(-1.6deg);
+}
+
+/* ---------- 紀錄卡 ---------- */
+
+.record {
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  box-shadow: var(--shadow-card);
+  position: relative;
+}
+
+/* 已無法取得的紀錄整張退色，像是被抽走內容的卡片 */
+.record-void {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--paper-2),
+    var(--paper-2) 11px,
+    var(--paper-3) 11px,
+    var(--paper-3) 22px
+  );
+}
+
+.record-void .record-text {
+  color: var(--ink-2);
+}
+
+/* 左側書脊，用顏色標示狀態，掃視時一眼可辨 */
+.record::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--rule-strong);
+}
+
+.record-live::before {
+  background: var(--live);
+}
+
+.record-void::before {
+  background: var(--stamp);
+}
+
+/* ---------- 進場動畫 ---------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  .reveal {
+    animation: reveal 0.42s cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+  }
+
+  @keyframes reveal {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+}
+
+/* ---------- 表單 ---------- */
+
+.slip-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1.5px solid var(--rule-strong);
+  outline: none;
+  font-family: var(--font-mono);
+  color: var(--ink);
+  caret-color: var(--stamp);
+}
+
+.slip-input:focus {
+  border-bottom-color: var(--stamp);
+}
+
+.slip-input::placeholder {
+  color: var(--ink-3);
+  opacity: 0.7;
+}
+
+.btn-ink {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.6875rem;
+  background: var(--ink);
+  color: var(--paper);
+  border: 1px solid var(--ink);
+  padding: 0.6rem 1.2rem;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.btn-ink:hover:not(:disabled) {
+  background: transparent;
+  color: var(--ink);
+}
+
+.btn-ink:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.link-ink {
+  color: var(--accent);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
 }
