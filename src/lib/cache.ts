@@ -56,10 +56,13 @@ function loadSqlite(): NodeSqliteModule {
 // ---------- 設定 ----------
 
 /**
- * schema 版本；改動表結構或 payload 形狀時 +1，舊表會被重建（快取本來就可拋棄）。
+ * schema 版本；改動表結構或 payload 形狀時 +1，**快取表**會被重建（快取本來就可拋棄）。
  * v2：ArchivedTweetRef 新增 createdAtSource，且 createdAt 改為推文發布時間而非抓取時間。
+ * v3：新增 local_captures 表；ArchivedTweetRef 新增 origin。
+ *
+ * 注意 local_captures 不隨版本變更被重建，見 migrate() 的說明。
  */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const DEFAULT_DB_PATH = './data/cache.db';
 
@@ -122,7 +125,12 @@ function migrate(db: DatabaseSyncLike): void {
   if (current === SCHEMA_VERSION) return;
 
   if (current !== 0) {
-    // 快取內容可以隨時重建，版本不符就直接砍掉重來，不寫複雜的資料搬遷。
+    // 這三張是純快取，內容隨時可以從 Internet Archive 或 X 重新取得，
+    // 版本不符就直接砍掉重來，不寫複雜的資料搬遷。
+    //
+    // local_captures 刻意**不在**這個清單裡：那是本站自己擷取的副本，
+    // 原推文一旦消失就再也拿不回來，砍掉等於永久遺失使用者的資料。
+    // 日後若要改它的結構，必須寫真正的資料搬遷，不可 DROP。
     console.warn(`[cache] schema 版本由 ${current} 變更為 ${SCHEMA_VERSION}，重建快取表`);
     db.exec('DROP TABLE IF EXISTS cdx_index');
     db.exec('DROP TABLE IF EXISTS tweet_content');
@@ -147,6 +155,17 @@ function migrate(db: DatabaseSyncLike): void {
       detail     TEXT,
       checked_at INTEGER NOT NULL
     );
+    -- 本站自行擷取保存的推文。不是快取：這可能是該推文僅存的副本，
+    -- 所以自帶 payload（不依賴 tweet_content）且永不過期。
+    CREATE TABLE IF NOT EXISTS local_captures (
+      tweet_id    TEXT PRIMARY KEY,
+      username    TEXT NOT NULL,
+      created_at  TEXT NOT NULL,
+      captured_at INTEGER NOT NULL,
+      payload     TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS local_captures_username_idx
+      ON local_captures(username);
   `);
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
@@ -307,6 +326,17 @@ export function getCachedTweets(ids: readonly string[]): Map<string, ArchivedTwe
       }
     }
   }
+
+  // tweet_content 是可拋棄的快取（schema 變更或 clearCache 都會清空），
+  // local_captures 才是本站保存的永久副本。快取沒有的就回頭問保存區，
+  // 否則清一次快取就會讓自己保存的推文讀不到內容。
+  const missing = ids.filter((id) => !found.has(id));
+  if (missing.length > 0) {
+    for (const [id, tweet] of getLocalCapturedTweets(missing)) {
+      found.set(id, tweet);
+    }
+  }
+
   return found;
 }
 
@@ -403,16 +433,103 @@ export function setCachedLiveness(results: readonly LivenessResult[]): void {
   });
 }
 
+// ---------- local_captures ----------
+//
+// 本站自行擷取保存的推文。這**不是快取**：Internet Archive 的推文索引並非全量收錄，
+// 這裡保存的可能是該則推文僅存的副本，因此永不過期、也不隨 schema 變更被清掉。
+
+/** 保存（或更新）一則本站擷取的推文。 */
+export function saveLocalCapture(username: string, tweet: ArchivedTweet): void {
+  const db = getDb();
+  db.prepare(
+    `INSERT INTO local_captures (tweet_id, username, created_at, captured_at, payload)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(tweet_id) DO UPDATE SET
+       username = excluded.username,
+       created_at = excluded.created_at,
+       captured_at = excluded.captured_at,
+       payload = excluded.payload`,
+  ).run(
+    tweet.tweetId,
+    normalizeUsername(username),
+    tweet.createdAt,
+    Date.now(),
+    JSON.stringify(tweet),
+  );
+}
+
+function parseTweetPayload(raw: unknown): ArchivedTweet | null {
+  try {
+    const parsed: unknown = JSON.parse(asString(raw));
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    return parsed as ArchivedTweet;
+  } catch {
+    return null;
+  }
+}
+
+/** 取出某帳號所有本站保存的推文，依發布時間由新到舊。 */
+export function getLocalCaptures(username: string): ArchivedTweet[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT payload FROM local_captures
+       WHERE username = ?
+       ORDER BY created_at DESC`,
+    )
+    .all(normalizeUsername(username));
+
+  const out: ArchivedTweet[] = [];
+  for (const row of rows) {
+    const tweet = parseTweetPayload(row.payload);
+    if (tweet) out.push(tweet);
+  }
+  return out;
+}
+
+/** 依 id 批次讀取本站保存的推文內容。 */
+export function getLocalCapturedTweets(ids: readonly string[]): Map<string, ArchivedTweet> {
+  const found = new Map<string, ArchivedTweet>();
+  if (ids.length === 0) return found;
+
+  const db = getDb();
+  for (const group of chunk(ids, MAX_PARAMS)) {
+    const placeholders = group.map(() => '?').join(',');
+    const rows = db
+      .prepare(
+        `SELECT tweet_id, payload FROM local_captures WHERE tweet_id IN (${placeholders})`,
+      )
+      .all(...group);
+    for (const row of rows) {
+      const tweet = parseTweetPayload(row.payload);
+      if (tweet) found.set(asString(row.tweet_id), tweet);
+    }
+  }
+  return found;
+}
+
+/** 目前保存了幾則。 */
+export function countLocalCaptures(): number {
+  const row = getDb().prepare('SELECT COUNT(*) AS c FROM local_captures').get();
+  return asNumber(row?.c);
+}
+
 // ---------- 清除 ----------
 
-export type CacheScope = 'all' | 'cdx' | 'tweets' | 'liveness';
+export type CacheScope = 'all' | 'cdx' | 'tweets' | 'liveness' | 'local';
 
-/** 清空快取；不給 scope 就全清。 */
+/**
+ * 清空快取；不給 scope 就清掉全部**快取**。
+ *
+ * 注意 `'all'` **不包含** `local_captures` —— 那是使用者主動保存的資料，
+ * 不是可重新取得的快取，只有明確指定 `'local'` 才會刪除。
+ */
 export function clearCache(scope: CacheScope = 'all'): void {
   const db = getDb();
   inTransaction(db, () => {
     if (scope === 'all' || scope === 'cdx') db.exec('DELETE FROM cdx_index');
     if (scope === 'all' || scope === 'tweets') db.exec('DELETE FROM tweet_content');
     if (scope === 'all' || scope === 'liveness') db.exec('DELETE FROM liveness');
+    if (scope === 'local') db.exec('DELETE FROM local_captures');
   });
 }
