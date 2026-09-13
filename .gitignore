@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 本機 SQLite 快取（ARCHIVE_DB_PATH 預設 ./data/cache.db）
+data/
