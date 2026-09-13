@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - archive-cache:/data
+    environment:
+      ARCHIVE_DB_PATH: /data/cache.db
+      # 快取存活時間（毫秒），可視需要調整
+      # ARCHIVE_CDX_TTL_MS: "21600000"
+      # ARCHIVE_LIVENESS_TTL_MS: "86400000"
+    restart: unless-stopped
+
+volumes:
+  archive-cache:
