@@ -1,6 +1,6 @@
 import { fetchArchivedIndex } from '@/lib/cdx';
-import { getCachedCdxIndex, setCachedCdxIndex } from '@/lib/cache';
-import type { ArchiveResponse, ApiError, ArchivedTweetRef } from '@/lib/types';
+import { getCachedCdxIndex, getLocalCaptures, setCachedCdxIndex } from '@/lib/cache';
+import type { ArchiveResponse, ApiError, ArchivedTweet, ArchivedTweetRef } from '@/lib/types';
 
 // node:sqlite 與 CDX 節流都需要 Node runtime，不能跑在 edge。
 export const runtime = 'nodejs';
@@ -27,6 +27,69 @@ function isoToCdxTimestamp(iso: string): string | null {
     `${p(d.getUTCFullYear(), 4)}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}` +
     `${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}`
   );
+}
+
+/** 把一則本站保存的推文包成索引用的參照。 */
+function toLocalRef(tweet: ArchivedTweet, fallbackUsername: string): ArchivedTweetRef {
+  const username = tweet.author.username ?? fallbackUsername;
+  return {
+    tweetId: tweet.tweetId,
+    username,
+    originalUrl: `https://x.com/${username}/status/${tweet.tweetId}`,
+    // 這裡沒有 Wayback 快照，時間戳純粹由發布時間推導，只為了排序與日期篩選。
+    timestamp: isoToCdxTimestamp(tweet.createdAt) ?? '00000000000000',
+    createdAt: tweet.createdAt,
+    // 取自擷取到的推文內容本身，精確。
+    createdAtSource: 'archive',
+    mimetype: 'application/json',
+    snapshotCount: 0,
+    structured: true,
+    origin: 'local',
+  };
+}
+
+/**
+ * 把本站保存的推文併進 Internet Archive 的索引。
+ *
+ * 這一步刻意放在讀取快取**之後**：索引本身快取 6 小時，若在建索引時才合併，
+ * 剛送件保存的推文要等快取過期才看得到。
+ * 同一則推文兩邊都有時保留存檔那筆 —— 它帶有真正的快照可供查證。
+ */
+function mergeLocalCaptures(
+  archived: readonly ArchivedTweetRef[],
+  username: string,
+): ArchivedTweetRef[] {
+  const locals = getLocalCaptures(username);
+  if (locals.length === 0) return [...archived];
+
+  const byId = new Map(locals.map((t) => [t.tweetId, t]));
+  const merged: ArchivedTweetRef[] = [];
+  const seen = new Set<string>();
+
+  for (const ref of archived) {
+    seen.add(ref.tweetId);
+    const local = byId.get(ref.tweetId);
+    // 兩邊都有時保留存檔那筆（它有真正的快照可查證），但若存檔只能提供「抓取時間」，
+    // 就改用本站擷取到的發布時間 —— 那是推文自己帶的，一定正確。
+    // 例：jack/status/20 早於 snowflake 制度，索引推出 2008-09-19，實際是 2006-03-21。
+    if (local && ref.createdAtSource === 'crawl') {
+      merged.push({ ...ref, createdAt: local.createdAt, createdAtSource: 'archive' });
+    } else {
+      merged.push(ref);
+    }
+  }
+
+  for (const tweet of locals) {
+    if (seen.has(tweet.tweetId)) continue;
+    merged.push(toLocalRef(tweet, username));
+  }
+
+  // 一律重排：除了新增的項目，上面也可能修正了既有項目的發布時間。
+  merged.sort((a, b) => {
+    if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
+    return a.tweetId === b.tweetId ? 0 : a.tweetId < b.tweetId ? 1 : -1;
+  });
+  return merged;
 }
 
 function parseIntParam(raw: string | null, fallback: number, min: number, max: number): number {
@@ -83,9 +146,13 @@ export async function GET(request: Request): Promise<Response> {
     if (!partial) setCachedCdxIndex(username, items);
   }
 
+  // 併入本站保存的推文。放在這裡（而不是建索引時）才能讓剛送件的推文立刻出現，
+  // 不必等索引快取過期。
+  const withLocal = mergeLocalCaptures(items, username);
+
   // 日期篩選在記憶體做，且依「發布時間」而非「抓取時間」——
   // 只有 HTML 快照的舊推文，其 timestamp 是抓取時間，拿來篩會篩錯。
-  let filtered = items;
+  let filtered: ArchivedTweetRef[] = withLocal;
   if (from !== undefined || to !== undefined) {
     const lo = from?.padEnd(14, '0');
     const hi = to?.padEnd(14, '9');
